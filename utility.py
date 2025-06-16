@@ -49,3 +49,5 @@ def max_drawdown(returns):
     peak = np.maximum.accumulate(wealth) #Returns the running maximum (i.e., max so far) of an array.
     drawdowns = (wealth - peak) / peak
     return drawdowns.min()
+
+print('hello')
