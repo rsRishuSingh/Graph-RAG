@@ -1,0 +1,12 @@
+groq        
+torch
+numpy
+PyMuPDF     
+chromadb 
+langchain  
+rank-bm25
+transformers
+langchain_community
+langchain_huggingface
+sentence_transformers
+langchain_experimental
