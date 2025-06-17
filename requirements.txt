@@ -3,6 +3,7 @@ torch
 numpy
 PyMuPDF     
 chromadb 
+chainlit
 langchain  
 rank-bm25
 transformers

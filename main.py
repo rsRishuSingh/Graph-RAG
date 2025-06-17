@@ -267,6 +267,7 @@ if __name__ == "__main__":
     if not collection.count():  # only upsert if empty
         upsert_documents(docs, collection)
     
+    
     # 4) Ask groq
     while(True):
         question = input('❓ What do you want to know: ')
