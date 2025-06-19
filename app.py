@@ -13,11 +13,13 @@ from langchain.docstore.document import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_experimental.text_splitter import SemanticChunker
 from groq import Groq
+from engineio.payload import Payload
+Payload.max_decode_packets = 500
 
 # Configuration constants
-EMBED_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
+EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 GROQ_MODEL_NAME = os.environ.get("GROQ_MODEL_NAME", "qwen/qwen3-32b")
-COLLECTION_NAME = "ch_DB_TRUMP"
+COLLECTION_NAME   = "TESLA"
 embeddings_model = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME) # required in only semantic chunking
 
 # Custom EmbeddingFunction for ChromaDB using local SentenceTransformer model
@@ -178,21 +180,23 @@ def ensemble_retrieval(
 
 # Ask Groq model
 
-def ask_Groq(collection, docs: List[Document], k: int, question: str) -> str:
+def ask_Groq(collection, k: int, docs, question: str) -> str:
     """
     Retrieve top-k docs and ask Groq for answer.
     """
-    # hits = ensemble_retrieval(docs, collection, question, k)
-    hits = search_chroma(collection, question, k)
+    hits = ensemble_retrieval(docs, collection, question, k)
+    # hits = search_chroma(collection, question, k)
     context = "\n\n".join(d.page_content for d in hits)
     system_msg = {"role": "system", "content": "You are an expert assistant."}
     user_msg = {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}\n"}
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
     resp = client.chat.completions.create(model=GROQ_MODEL_NAME, messages=[system_msg, user_msg], temperature=0.2)
     answer = resp.choices[0].message.content
+    
     # Remove internal think blocks
-    cleaned = re.sub(r"<think>.*?</think>\s*", "", answer, flags=re.DOTALL)
-    return cleaned.strip()
+    # cleaned = re.sub(r"<think>.*?</think>\s*", "", answer, flags=re.DOTALL)
+    # return cleaned.strip()
+    return answer
 
 # Chainlit events
 
@@ -211,10 +215,12 @@ async def setup():
     with open(pdf.path, "rb") as f:
         pdf_bytes = f.read()
     # print(dir(cl.AskFileMessage)) 
-    await cl.Message(content=f"Processing `{pdf.name}`...").send()
-
+    msg =  cl.Message(content=f"Processing `{pdf.name}`...")
+    await msg.send()
     # Extract and store docs
     docs = extract_chunks_from_pdf_bytes(pdf_bytes, pdf.name)
+    msg.content = "Hello Extracting Chunks!"
+    await msg.update()
     # Persist to ChromaDB
     collection = create_or_reload_collection()
     if not collection.count():
@@ -230,6 +236,10 @@ async def setup():
 async def chat(message: str):
     collection = cl.user_session.get("collection")
     docs = cl.user_session.get("docs")
+    msg =  cl.Message(content=f"Got Chunks anf Docs")
+    await msg.send()
     query = message.content
-    answer = ask_Groq(collection, docs, 3, query)
+    msg.content = "Asking Groq!"
+    await msg.update()
+    answer = ask_Groq(collection, 5, docs, query)
     await cl.Message(content=answer).send()

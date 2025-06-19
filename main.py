@@ -21,11 +21,11 @@ class LocalHFEmbedding(EmbeddingFunction):
         return self.model.encode(texts).tolist()
 
 #  Configuration
-EMBED_MODEL_NAME  = "Qwen/Qwen3-Embedding-0.6B"
+EMBED_MODEL_NAME  = "sentence-transformers/all-MiniLM-L6-v2"
 GROQ_MODEL_NAME = "qwen/qwen3-32b"
-COLLECTION_NAME   = "ch_DB_TRUMP"
+COLLECTION_NAME   = "TESLA"
 PDF_DIR           = "PDFs/"
-PDF_FILES         = ["Trump"]           # without .pdf extension
+PDF_FILES         = ["TESLA"]           # without .pdf extension
 
 # login via terminal and set huggingface api key
 embeddings_model = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME) # required in only semantic chunking
