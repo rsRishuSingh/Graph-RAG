@@ -9,8 +9,8 @@ from chromadb import PersistentClient
 from langchain.docstore.document import Document
 from sentence_transformers import SentenceTransformer
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_experimental.text_splitter import SemanticChunker
 from chromadb.utils.embedding_functions import EmbeddingFunction
+from langchain_experimental.text_splitter import SemanticChunker
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 #  Custom EmbeddingFunction for ChromaDB using local SentenceTransformer model
 class LocalHFEmbedding(EmbeddingFunction):
