@@ -28,7 +28,7 @@ all_docs = load_docs("all_docs.json")
 print(f"📄 Loaded {len(all_docs)} pre-chunked documents")
 
 graph = Neo4jGraph(
-    url="bolt+s://933bd554.databases.neo4j.io:7687",
+    url="bolt+ssc://933bd554.databases.neo4j.io:7687",
     username="neo4j",
     password="CMy8sjFM9grBNaz0R4uPWvMznKb8ECad-buNINUPcbs",
     database="neo4j",
@@ -37,7 +37,7 @@ graph = Neo4jGraph(
 print("✅ Connected to Neo4j Aura")
 
 start = time.time()
-for idx, doc in enumerate(all_docs[788:], 788):
+for idx, doc in enumerate(all_docs[825:], 825):
     print(f"[{idx}/{len(all_docs)}] Converting → GraphDocument…", end="\r")
     try:
         gd = transformer.convert_to_graph_documents([doc])[0]

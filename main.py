@@ -1,286 +1,231 @@
-import re
 import os
 import json
+import time
+import re
 import fitz  # PyMuPDF
-from groq import Groq
+from dotenv import load_dotenv
 from typing import List
-from rank_bm25 import BM25Okapi
-from chromadb import PersistentClient
+
+# LangChain and embedding imports
 from langchain.docstore.document import Document
-from sentence_transformers import SentenceTransformer
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
-from chromadb.utils.embedding_functions import EmbeddingFunction
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-#  Custom EmbeddingFunction for ChromaDB using local SentenceTransformer model
+
+# ChromaDB imports
+from chromadb import PersistentClient
+from chromadb.utils.embedding_functions import EmbeddingFunction
+
+# BM25 for keyword retrieval
+from rank_bm25 import BM25Okapi
+
+# Neo4j vector store
+from langchain_neo4j import Neo4jVector
+
+# Groq client for LLM inference
+from groq import Groq
+
+# --- Configuration ---
+load_dotenv()
+EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+GROQ_MODEL_NAME = "qwen/qwen3-32b"
+COLLECTION_NAME = "TESLA_RAG_DOCS"
+CHROMA_DB_PATH = "chromaDB/saved/"
+PDF_DIR = "PDFs/"
+PDF_FILES = ["TESLA"]
+ALL_DOCS_JSON = "all_docs.json"
+
+# Neo4j settings via env
+NEO4J_URI = os.getenv("NEO4J_URI")
+NEO4J_USER = os.getenv("NEO4J_USERNAME")
+NEO4J_PW = os.getenv("NEO4J_PASSWORD")
+NEO4J_INDEX = os.getenv("NEO4J_INDEX", "LangChainDocs")
+
+# --- Embedding wrapper for ChromaDB ---
 class LocalHFEmbedding(EmbeddingFunction):
     def __init__(self, model_name: str):
+        from sentence_transformers import SentenceTransformer
         self.model = SentenceTransformer(model_name)
+
     def __call__(self, texts: List[str]) -> List[List[float]]:
-        """Encode a batch of texts into embedding vectors."""
         return self.model.encode(texts).tolist()
 
-#  Configuration
-EMBED_MODEL_NAME  = "sentence-transformers/all-MiniLM-L6-v2"
-GROQ_MODEL_NAME = "qwen/qwen3-32b"
-COLLECTION_NAME   = "TESLA"
-PDF_DIR           = "PDFs/"
-PDF_FILES         = ["TESLA"]           # without .pdf extension
+# --- Text Chunking ---
 
-# login via terminal and set huggingface api key
-embeddings_model = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME) # required in only semantic chunking
-
-
-def recursive_split(text, chunk_size=500, chunk_overlap=100):
+def recursive_split(text: str, chunk_size: int = 500, chunk_overlap: int = 100) -> List[str]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", ".", " "]
-        )
+    )
     return splitter.split_text(text)
 
-#  Semantic chunker wrapper
-def semantic_chunker(text: str) -> List[str]:
-    """
-    Split text into semantically coherent chunks using LangChain's SemanticChunker.
-    """
-    recursiveChunks = recursive_split(text);
-    chunker = SemanticChunker(embeddings_model)
-    final_chunks = []
-    for chunk in recursiveChunks:
-        semantic_chunks = chunker.split_text(chunk)
-        final_chunks.extend(semantic_chunks)   # list + list 
-    return final_chunks
 
-#  PDF Extraction and Chunking
-def extract_chunks_from_pdf(pdf_path: str) -> List[Document]:
-    """
-    Reads a PDF file, splits each page into semantic chunks, and
-    returns a list of Document objects with page/chunk metadata.
-    """
-    print('🗂️  Getting PDF...\n\n')
+def semantic_chunker(text: str, embeddings_model) -> List[str]:
+    chunks = []
+    for seg in recursive_split(text):
+        chunker = SemanticChunker(embeddings_model)
+        chunks.extend(chunker.split_text(seg))
+    return chunks
+
+# --- PDF Extraction ---
+
+def extract_chunks_from_pdf(pdf_path: str, embeddings_model) -> List[Document]:
     docs: List[Document] = []
     pdf = fitz.open(pdf_path)
-    for page_index, page in enumerate(pdf):
-        print('📖 Reading Page no: ', page_index+1)
-        text = page.get_text("text")
-        chunks = semantic_chunker(text)
-        for chunk_index, chunk in enumerate(chunks):
-            metadata = {
-                "page": page_index + 1,
-                "chunk": chunk_index,    # set back to zero when page changes
-                "source": os.path.basename(pdf_path)
-            }
-            docs.append(Document(page_content=chunk, metadata=metadata))
+    for page_idx, page in enumerate(pdf):
+        text = re.sub(r'\s+', ' ', page.get_text("text")).strip()
+        if not text:
+            continue
+        for idx, chunk in enumerate(semantic_chunker(text, embeddings_model)):
+            docs.append(Document(
+                page_content=chunk,
+                metadata={"page": page_idx + 1, "chunk": idx, "source": os.path.basename(pdf_path)}
+            ))
     pdf.close()
     return docs
 
-#  ChromaDB Client Initialization
-def create_or_reload_collection():
-    """
-    Creates (or loads, if exists) a ChromaDB collection with a local HF embedding.
-    """
-    print('🧩 Creating Database...')
-    client = PersistentClient(path="chromaDB/saved/")
-    collection = client.get_or_create_collection(
-    name=COLLECTION_NAME,
-    embedding_function=LocalHFEmbedding(EMBED_MODEL_NAME)
-)
-    return collection
+# --- Save/Load ---
 
-#  Document Upsert
-def upsert_documents(
-    docs: List[Document],
-    collection
-) -> None:
-    """
-    Upserts a batch of Document objects into the given ChromaDB collection.
-    """
-    print('🧠 Storing Embeddings...')
-    ids = [f"id_{i}" for i in range(len(docs))]
-    documents = [d.page_content for d in docs]
-    metadatas = [d.metadata    for d in docs]
-    collection.upsert(
-        ids=ids,
-        documents=documents,
-        metadatas=metadatas
-    )
-
-#  Delete Entire Collection
-def delete_collection(collection) -> None:
-    """
-    Deletes all entries from the given ChromaDB collection.
-    """
-    collection.delete()
-
-#  Vector Similarity Search (Chroma)
-def search_chroma(collection, query: str, k: int = 5) -> List[Document]:
-    """
-    Performs a pure vector-based k-NN search in ChromaDB.
-    """
-    resp = collection.query(
-        query_texts=[query],
-        n_results=k,
-        include=["documents", "metadatas"]
-    )
-    # Reconstruct Documents from response
-    results = []
-    for doc_str, meta in zip(resp["documents"][0], resp["metadatas"][0]):
-        results.append(Document(page_content=doc_str, metadata=meta))
-    return results
-
-#  BM25 Retriever
-def bm25_retriever(
-    docs: List[Document],
-    query: str,
-    k: int = 5
-) -> List[Document]:
-    """
-    Performs BM25 retrieval over the raw chunk texts of Document list.
-    """
-    texts = [d.page_content for d in docs]
-    tokenized = [text.split() for text in texts]
-    bm25 = BM25Okapi(tokenized)
-    scores = bm25.get_scores(query.split())
-    top_idxs = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
-    return [docs[i] for i in top_idxs]
-
-#  Ensemble Retrieval: BM25 + Vector
-def ensemble_retrieval(
-    docs: List[Document],
-    collection,
-    query: str,
-    k: int = 5
-) -> List[Document]:
-    """
-    Combines BM25 and vector retrieval:
-    - gets top-k BM25 hits and top-k Chroma hits,
-    - scores them by rank, merges & de-duplicates.
-    """
-    print('🧐 Searching in DB')
-    bm25_hits = bm25_retriever(docs, query, k)
-    vec_hits  = search_chroma(collection, query, k)
-
-    scores = {}
-    for rank, doc in enumerate(bm25_hits):
-        scores[doc.page_content] = scores.get(doc.page_content, 0) + (k - rank)
-    for rank, doc in enumerate(vec_hits):
-        scores[doc.page_content] = scores.get(doc.page_content, 0) + (k - rank)
-
-    sorted_texts = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:k]
-  
-    # Map back to Document objects
-    lookup = {d.page_content: d for d in docs}
-    return [lookup[text] for text, _ in sorted_texts]
-
-#  Results Printer
-def print_results(results: List[Document]) -> None:
-    """
-    Uniformly prints out snippets and metadata of retrieved Documents.
-    """
-    for i, doc in enumerate(results, 1):
-        snippet = doc.page_content.replace("\n", " ")[:200]
-        print(f"--- Result {i} ---")
-        print(f"Snippet : {snippet}...")
-        print(f"Metadata: {doc.metadata}\n")
-
-#  JSON Save & Load for Documents
-def save_docs(docs: List[Document], filepath: str = "all_docs.json") -> None:
-    """
-    Saves a list of Document objects to JSON for reuse.
-    """
-    print('📥 Saving Chunks...')
-    arr = [
-        {"page_content": d.page_content, "metadata": d.metadata}
-        for d in docs
-    ]
+def save_docs(docs: List[Document], filepath: str = ALL_DOCS_JSON) -> None:
     with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(arr, f, ensure_ascii=False, indent=2)
-    print(f"Saved {len(docs)} documents to {filepath}")
+        json.dump([{"page_content": d.page_content, "metadata": d.metadata} for d in docs], f, indent=2)
 
-# Load already saved json
-def load_docs(filepath: str = "all_docs.json") -> List[Document]:
-    """
-    Loads Document objects from a JSON file.
-    """
-    print('⌛ Loading Chunks...')
-    if not os.path.exists(filepath):
-        return []
+
+def load_docs(filepath: str = ALL_DOCS_JSON) -> List[Document]:
+    if not os.path.exists(filepath): return []
     with open(filepath, "r", encoding="utf-8") as f:
         arr = json.load(f)
     return [Document(page_content=a["page_content"], metadata=a["metadata"]) for a in arr]
 
-# Ask Groq
-def ask_Groq(collection, docs, k, question: str = "generate a summary of this pdf?"):
-    # Retrieve top‑k docs
-    docs = ensemble_retrieval(docs, collection, question, k)
-    context = "\n\n".join(doc.page_content for doc in docs)
+# --- Initialize vector stores ---
 
-    #Prepare your messages
-    system_msg = {"role": "system",    "content": "You are an expert assistant."}
-    user_msg   = {
-        "role": "user",
-        "content": (
-            "Use the following context to answer the question.\n\n"
-            f"Context:\n{context}\n\n"
-            f"Question:\n{question}\n\n"
-            "Answer:"
-        )
-    }
-
-    # (only the API key here)
-    client = Groq(api_key=os.environ["GROQ_API_KEY"])
-
-    resp = client.chat.completions.create(
-        model=os.environ.get("GROQ_MODEL_NAME", "qwen/qwen3-32b"),
-        messages=[system_msg, user_msg],
-        temperature=0.2,
-        stream=False,
+def init_chroma():
+    client = PersistentClient(path=CHROMA_DB_PATH)
+    return client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        embedding_function=LocalHFEmbedding(EMBED_MODEL_NAME)
     )
-    answer = resp.choices[0].message.content
-    think_match = re.search(r"<think>(.*?)</think>", answer, flags=re.DOTALL)
-    if think_match:
-        think_text = think_match.group(1).strip()
-        print("💬\n", think_text)
 
-    # Remove the <think>...</think> block from the original answer
-    cleaned = re.sub(r"<think>.*?</think>\s*", "", answer, flags=re.DOTALL)
-    print("\n\n🤖", cleaned.strip())
+
+def init_neo4j_vector(embeddings_model: HuggingFaceEmbeddings, docs: List[Document]):
+    """
+    Try loading an existing Neo4j vector index; if absent, create a new one by indexing docs.
+    """
+    try:
         
+        vectorstore = Neo4jVector.from_existing_index(
+            embedding=embeddings_model,
+            url=NEO4J_URI,
+            username=NEO4J_USER,
+            password=NEO4J_PW,
+            index_name=NEO4J_INDEX
+        )
+        print("loaded existing Neo4j vectorstore")
+        return vectorstore
+    except Exception as e:
+        print(f"⚠️ Neo4j index '{NEO4J_INDEX}' not found; creating new vector store. ({e})")
+        vectorstore = Neo4jVector.from_documents(
+            documents=docs,
+            embedding=embeddings_model,
+            url=NEO4J_URI,
+            username=NEO4J_USER,
+            password=NEO4J_PW,
+            index_name=NEO4J_INDEX
+        )
+        print(f"✅ Created new Neo4j vector index '{NEO4J_INDEX}' with {len(docs)} docs.")
+        return vectorstore
+
+# --- Upsert to Chroma ---
+
+def upsert_chroma(collection, docs: List[Document]):
+    ids = [f"doc_{i}_{hash(d.page_content)}" for i, d in enumerate(docs)]
+    collection.upsert(ids=ids,
+                      documents=[d.page_content for d in docs],
+                      metadatas=[d.metadata for d in docs])
+
+# --- Retrieval methods ---
+
+def bm25_retriever(docs: List[Document], query: str, k: int = 5) -> List[Document]:
+    tokenized = [d.page_content.split() for d in docs]
+    bm25 = BM25Okapi(tokenized)
+    scores = bm25.get_scores(query.split())
+    chunks = [docs[idx] for idx, _ in sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:k]]
+    print("BM25 chunks --> ", chunks)
+    return chunks
 
 
-#  Main Execution Flow
-if __name__ == "__main__":
-    
-    # 1) Load or build document chunks
-    docs = load_docs()  # remove this when deployed because it prevent newer docs from getting stored
+def chroma_retriever(collection, query: str, k: int = 5) -> List[Document]:
+    resp = collection.query(query_texts=[query], n_results=k,
+                             include=["documents", "metadatas"])
+    chunks =  [Document(page_content=d, metadata=m)
+            for d, m in zip(resp["documents"][0], resp["metadatas"][0])]
+    print("ChromaDB chunks --> ", chunks)
+    return chunks
+
+
+def neo4j_retriever(vectorstore: Neo4jVector, query: str, k: int = 5) -> List[Document]:
+    chunks = vectorstore.similarity_search(query, k=k)
+    print("Neo4j chunks --> ", chunks)
+    return chunks
+
+# --- Combine Common Context ---
+
+def common_context(*lists_of_docs: List[Document]) -> str:
+    sets = [set(d.page_content for d in docs) for docs in lists_of_docs]
+    common = set.intersection(*sets)
+    common_chunks = "\n\n".join(common)
+    print( common_chunks)
+    return common_chunks
+
+# --- Ask Groq with combined context ---
+
+def ask_groq(chroma_col, neo4j_vec, all_docs, question: str, k: int = 5):
+    bm25_hits = bm25_retriever(all_docs, question, k)
+    chroma_hits = chroma_retriever(chroma_col, question, k)
+    neo4j_hits = neo4j_retriever(neo4j_vec, question, k)
+
+    context = common_context(bm25_hits, chroma_hits, neo4j_hits)
+    if not context:
+        print("No common context across all retrievers.")
+        return
+
+    messages = [
+        {"role": "system", "content": "You are an expert assistant. Answer using only provided context."},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"}
+    ]
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    resp = client.chat.completions.create(model=os.getenv("GROQ_MODEL_NAME", GROQ_MODEL_NAME),
+                                         messages=messages, temperature=0.2)
+    print(resp.choices[0].message.content)
+
+# --- Main Flow ---
+
+def main():
+    # 1) Load or extract docs
+    embeddings_model = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME)
+    docs = load_docs()
     if not docs:
         for name in PDF_FILES:
             path = os.path.join(PDF_DIR, f"{name}.pdf")
-            docs.extend(extract_chunks_from_pdf(path))
+            if os.path.exists(path):
+                docs.extend(extract_chunks_from_pdf(path, HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME)))
         save_docs(docs)
 
-    # 2) Initialize or load ChromaDB collection
-    collection = create_or_reload_collection()
+    # 2) Init stores
+    chroma_col = init_chroma()
+    neo4j_vec = init_neo4j_vector(embeddings_model, docs)
 
-    # 3) Upsert docs into Chroma (if first run)
-    if not collection.count():  # only upsert if empty
-        upsert_documents(docs, collection)
-    
-    
-    # 4) Ask groq
-    while(True):
-        question = input('❓ What do you want to know: ')
-        if(question.capitalize() == 'Quit'):
-            break
-        ask_Groq( collection, docs, 3, question)
-    print('👋 Bye! See you Again')
-    
-    # print("\n[Vector Search]")
-    # print_results(search_chroma(collection, query, k=5))
+    # 3) Upsert to Chroma if empty
+    if chroma_col.count() == 0:
+        upsert_chroma(chroma_col, docs)
 
-    # print("\n[BM25 Search]")
-    # print_results(bm25_retriever(docs, query, k=5))
+    # 4) Interactive loop
+    print("--- RAG System Ready ---")
+    while True:
+        q = input('❓ What do you want to know: ')
+        if q.lower() == 'quit': break
+        ask_groq(chroma_col, neo4j_vec, docs, q)
 
-    # print("\n[Ensemble Search]")
-    # print_results(ensemble_retrieval(docs, collection, query, k=5))
+if __name__ == "__main__":
+    main()
