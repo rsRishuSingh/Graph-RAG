@@ -7,8 +7,9 @@ from typing import List
 import fitz  # PyMuPDF for PDF parsing
 from langchain.docstore.document import Document
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 from langchain.retrievers import EnsembleRetriever
 from langchain_chroma import Chroma  # updated import to avoid deprecation warning
 from langchain_community.retrievers import BM25Retriever

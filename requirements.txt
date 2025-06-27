@@ -1,13 +1,32 @@
-groq        
+# Core utilities
+python-dotenv
+PyMuPDF                # provides fitz
+chainlit               # your Chainlit app framework
+
+# LangChain and its extensions
+langchain>=0.3.26
+langchain-text-splitters
+langchain-huggingface
+langchain-community
+langchain-chroma
+langchain-neo4j
+langchain-groq
+langchain-experimental  # for langchain.experimental.graph_transformers
+
+# Vectorstores & embeddings
+chromadb
+sentence-transformers   # SentenceTransformer & Chroma EmbeddingFunction
+
+# Groq Python SDK
+groq
+
+# Retrieval
+rank-bm25
+
+# ML backends
 torch
 numpy
-PyMuPDF     
-chromadb 
-chainlit
-langchain  
-rank-bm25
 transformers
-langchain_community
-langchain_huggingface
-sentence_transformers
-langchain_experimental
+
+
+openai
