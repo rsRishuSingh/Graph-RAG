@@ -43,6 +43,7 @@ A scalable RAG system that processes thousands of pages of financial and technic
 * Provides feedback on startup (e.g., ⚠️ no documents, ✅ collection loaded) and streams generated answers in real time.
 
 ---
+## ![Output](https://github.com/user-attachments/assets/30f87ec4-48dd-4b3b-938c-eba12a1bd463)
 
 ## Installation
 
