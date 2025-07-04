@@ -49,8 +49,8 @@ A scalable RAG system that processes thousands of pages of financial and technic
 1. **Clone & Setup**
 
    ```bash
-   git clone https://github.com/yourusername/TESLA_RAG_DOCS.git
-   cd TESLA_RAG_DOCS
+   git clone https://github.com/rsRishuSingh/Graph-RAG.git
+   cd Graph-RAG
    python -m venv venv && source venv/bin/activate
    ```
 
@@ -104,7 +104,3 @@ Update constants in code as needed (`EMBED_MODEL_NAME`, `COLLECTION_NAME`, `CHRO
 3. **Democratizes AI:** Intuitive chat UI for enterprise users without ML expertise.
 
 ---
-
-## License
-
-This project is licensed under MIT. See [LICENSE](LICENSE) for details.
