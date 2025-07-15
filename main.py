@@ -156,14 +156,14 @@ def main() -> None:
     if chroma_store._collection.count() == 0:
         chroma_store.add_documents(docs)
 
+    chroma_retriever = chroma_store.as_retriever(
+        search_type="mmr",  # avoids returning documents that are too similar to each other
+        search_kwargs={"k": 5, "fetch_k": 10}
+    )
     bm25_retriever = BM25Retriever.from_texts(
         [d.page_content for d in docs],
         metadatas=[d.metadata for d in docs],
         k=5
-    )
-    chroma_retriever = chroma_store.as_retriever(
-        search_type="mmr",  # avoids returning documents that are too similar to each other
-        search_kwargs={"k": 5, "fetch_k": 10}
     )
     neo4j_retriever = neo4j_store.as_retriever(
         search_type="similarity",
