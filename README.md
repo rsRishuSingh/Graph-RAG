@@ -12,6 +12,7 @@ A scalable RAG system that processes thousands of pages of financial and technic
 * **Groq LLM Integration:** Low‑temperature, context‑driven generation ensuring factual consistency.
 
 ---
+<img width="1892" height="897" alt="graph" src="https://github.com/user-attachments/assets/ed7f4dc8-3520-4661-9ada-e1722af42d13" />
 
 ## Search Components
 
